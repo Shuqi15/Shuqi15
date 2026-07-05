@@ -1,1 +1,0 @@
-{"root":["./src/App.tsx","./src/main.tsx","./src/types.ts","./src/components/OptionSelect.tsx","./src/components/PromptPanel.tsx","./src/components/ShotEditor.tsx","./src/components/ShotList.tsx","./src/data/options.ts","./src/data/platforms.ts","./src/lib/id.ts","./src/lib/promptBuilder.ts","./src/lib/splitter.ts","./src/lib/storage.ts"],"version":"5.9.3"}
