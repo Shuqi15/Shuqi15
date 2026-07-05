@@ -56,6 +56,7 @@ export function buildShots(text: string, limit: DurationLimit): Shot[] {
     order: i + 1,
     scriptSegment: seg,
     directorNote: '',
+    anchorNote: '',
     selections: defaultSelections(),
     duration: durations[i],
   }))

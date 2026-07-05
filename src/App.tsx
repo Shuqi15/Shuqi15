@@ -4,6 +4,7 @@ import { PLATFORMS } from './data/platforms'
 import { defaultSelections } from './data/options'
 import { buildShots, renumberAndReallocate, splitScript } from './lib/splitter'
 import { loadProject, saveProject } from './lib/storage'
+import { generateShotPrompt, getApiKey, hasApiKey, setApiKey } from './lib/ai'
 import { uid } from './lib/id'
 import ShotList from './components/ShotList'
 import ShotEditor from './components/ShotEditor'
@@ -14,10 +15,11 @@ const DURATIONS: DurationLimit[] = [10, 15, 30]
 function newProject(): Project {
   return {
     id: uid('proj'),
-    title: '未命名项目',
+    title: '未命名短剧',
     scriptText: '',
-    platformId: 'libtv',
+    platformId: 'seedance',
     durationLimit: 15,
+    toneRef: '',
     shots: [],
     updatedAt: Date.now(),
   }
@@ -27,8 +29,11 @@ export default function App() {
   const [project, setProject] = useState<Project>(() => loadProject() ?? newProject())
   const [activeId, setActiveId] = useState<string | null>(null)
   const [scriptDraft, setScriptDraft] = useState(project.scriptText)
+  const [apiKey, setKey] = useState(getApiKey())
+  const [showKey, setShowKey] = useState(!hasApiKey())
+  const [generatingId, setGeneratingId] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
-  // 变更即存本地
   useEffect(() => {
     saveProject({ ...project, updatedAt: Date.now() })
   }, [project])
@@ -46,14 +51,12 @@ export default function App() {
     update({ shots: renumberAndReallocate(next, project.durationLimit) })
   }
 
-  // ---------- 剧本拆分 ----------
   function doSplit() {
     const shots = buildShots(scriptDraft, project.durationLimit)
     setProject((p) => ({ ...p, scriptText: scriptDraft, shots }))
     setActiveId(shots[0]?.id ?? null)
   }
 
-  // ---------- 镜头操作 ----------
   function patchShot(id: string, patch: Partial<Shot>) {
     setProject((p) => ({
       ...p,
@@ -68,9 +71,9 @@ export default function App() {
     const cur = project.shots[idx]
     const merged: Shot = {
       ...prev,
-      // 合并原文并衔接上下文
       scriptSegment: `${prev.scriptSegment} ${cur.scriptSegment}`.trim(),
       directorNote: [prev.directorNote, cur.directorNote].filter(Boolean).join('；'),
+      aiOutput: undefined, // 合并后需重生成
     }
     const next = [...project.shots.slice(0, idx - 1), merged, ...project.shots.slice(idx + 1)]
     setShots(next)
@@ -87,10 +90,11 @@ export default function App() {
       id: i === 0 ? cur.id : uid('shot'),
       order: 0,
       scriptSegment: seg,
-      // 第一段保留原设计，其余段重置为 N/A
       directorNote: i === 0 ? cur.directorNote : '',
+      anchorNote: i === 0 ? cur.anchorNote : '',
       selections: i === 0 ? cur.selections : defaultSelections(),
       duration: 0,
+      aiOutput: undefined,
     }))
     const next = [...project.shots.slice(0, idx), ...newShots, ...project.shots.slice(idx + 1)]
     setShots(next)
@@ -110,6 +114,26 @@ export default function App() {
     }))
   }
 
+  async function handleGenerate(shot: Shot) {
+    setError(null)
+    setGeneratingId(shot.id)
+    try {
+      // 用最新 project 状态生成（含上一镜承接）
+      const text = await generateShotPrompt(project, shot)
+      patchShot(shot.id, { aiOutput: text })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setGeneratingId(null)
+    }
+  }
+
+  function saveKey() {
+    setApiKey(apiKey.trim())
+    setShowKey(false)
+    setError(null)
+  }
+
   return (
     <div className="flex h-screen flex-col">
       {/* 顶栏 */}
@@ -118,7 +142,13 @@ export default function App() {
         <input
           value={project.title}
           onChange={(e) => update({ title: e.target.value })}
-          className="w-40 rounded border border-edge bg-ink px-2 py-1 text-sm text-gray-200 outline-none focus:border-accent"
+          className="w-32 rounded border border-edge bg-ink px-2 py-1 text-sm text-gray-200 outline-none focus:border-accent"
+        />
+        <input
+          value={project.toneRef}
+          onChange={(e) => update({ toneRef: e.target.value })}
+          placeholder="影调风格参考（如《继承之战》冷峻资本气质）"
+          className="w-56 rounded border border-edge bg-ink px-2 py-1 text-xs text-gray-200 outline-none focus:border-accent"
         />
         <div className="ml-auto flex items-center gap-3 text-xs">
           <label className="flex items-center gap-1">
@@ -144,9 +174,7 @@ export default function App() {
                   onClick={() => changeDuration(d)}
                   className={[
                     'px-2 py-1',
-                    project.durationLimit === d
-                      ? 'bg-accent text-ink'
-                      : 'bg-ink text-gray-300 hover:bg-edge',
+                    project.durationLimit === d ? 'bg-accent text-ink' : 'bg-ink text-gray-300 hover:bg-edge',
                   ].join(' ')}
                 >
                   {d}s
@@ -154,15 +182,43 @@ export default function App() {
               ))}
             </div>
           </label>
+          <button
+            onClick={() => setShowKey((v) => !v)}
+            className={[
+              'rounded border px-2 py-1',
+              hasApiKey() ? 'border-green-700 text-green-400' : 'border-yellow-700 text-yellow-400',
+            ].join(' ')}
+            title="设置 Claude API Key（存本地）"
+          >
+            {hasApiKey() ? 'Key ✓' : '设置 Key'}
+          </button>
         </div>
       </header>
+
+      {/* API Key 面板 */}
+      {showKey && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-edge bg-ink px-4 py-2 text-xs">
+          <span className="text-gray-400">Claude API Key（sk-ant-…，仅存本地浏览器，不上传）：</span>
+          <input
+            type="password"
+            value={apiKey}
+            onChange={(e) => setKey(e.target.value)}
+            placeholder="sk-ant-..."
+            className="w-72 rounded border border-edge bg-panel px-2 py-1 text-gray-200 outline-none focus:border-accent2"
+          />
+          <button onClick={saveKey} className="rounded bg-accent2 px-3 py-1 font-semibold text-ink hover:brightness-110">
+            保存
+          </button>
+          <span className="text-gray-500">L2 从你的浏览器直连 api.anthropic.com。</span>
+        </div>
+      )}
 
       {/* 剧本输入条 */}
       <div className="flex items-start gap-2 border-b border-edge bg-ink px-4 py-2.5">
         <textarea
           value={scriptDraft}
           onChange={(e) => setScriptDraft(e.target.value)}
-          placeholder="在此粘贴剧本 / 剧情 / 一句话，例如：他推开门，看见空荡的房间。她早已离开。桌上留着一张字条……"
+          placeholder="在此粘贴剧本 / 剧情 / 台词。例如：明窈将合同往桌上一推。裴渡缓缓直起身，冷笑。「你觉得，你有得选？」"
           className="h-16 flex-1 resize-y rounded-md border border-edge bg-panel p-2 text-sm text-gray-200 outline-none focus:border-accent"
         />
         <button
@@ -173,8 +229,14 @@ export default function App() {
         </button>
       </div>
 
+      {error && (
+        <div className="border-b border-red-900 bg-red-950/50 px-4 py-1.5 text-xs text-red-300">
+          生成失败：{error}
+        </div>
+      )}
+
       {/* 三栏主体 */}
-      <main className="grid min-h-0 flex-1 grid-cols-[300px_1fr_360px]">
+      <main className="grid min-h-0 flex-1 grid-cols-[280px_1fr_360px]">
         <section className="min-h-0 overflow-y-auto border-r border-edge">
           <div className="border-b border-edge px-4 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
             分镜列表（可编辑 / 合并 / 拆分）
@@ -193,14 +255,14 @@ export default function App() {
         <section className="min-h-0 overflow-hidden border-r border-edge">
           {activeShot ? (
             <ShotEditor
-              project={project}
               shot={activeShot}
+              generating={generatingId === activeShot.id}
+              hasKey={hasApiKey()}
               onChange={(patch) => patchShot(activeShot.id, patch)}
+              onGenerate={() => handleGenerate(activeShot)}
             />
           ) : (
-            <div className="p-6 text-sm text-gray-500">
-              左侧选择一个镜头开始设计，或先在上方拆分剧本。
-            </div>
+            <div className="p-6 text-sm text-gray-500">左侧选择一个镜头开始设计，或先在上方拆分剧本。</div>
           )}
         </section>
 
