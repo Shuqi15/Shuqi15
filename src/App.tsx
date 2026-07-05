@@ -4,7 +4,19 @@ import { PLATFORMS } from './data/platforms'
 import { defaultSelections } from './data/options'
 import { buildShots, renumberAndReallocate, splitScript } from './lib/splitter'
 import { loadProject, saveProject } from './lib/storage'
-import { generateShotPrompt, getApiKey, hasApiKey, setApiKey } from './lib/ai'
+import {
+  DEFAULT_MODEL,
+  PROVIDER_LABEL,
+  generateShotPrompt,
+  getApiKey,
+  getModel,
+  getProvider,
+  hasApiKey,
+  setApiKey,
+  setModel,
+  setProvider,
+  type Provider,
+} from './lib/ai'
 import { uid } from './lib/id'
 import ShotList from './components/ShotList'
 import ShotEditor from './components/ShotEditor'
@@ -29,8 +41,17 @@ export default function App() {
   const [project, setProject] = useState<Project>(() => loadProject() ?? newProject())
   const [activeId, setActiveId] = useState<string | null>(null)
   const [scriptDraft, setScriptDraft] = useState(project.scriptText)
-  const [apiKey, setKey] = useState(getApiKey())
+  const [provider, setProviderState] = useState<Provider>(getProvider())
+  const [apiKey, setKey] = useState(getApiKey(getProvider()))
+  const [modelInput, setModelInput] = useState(getModel(getProvider()))
   const [showKey, setShowKey] = useState(!hasApiKey())
+
+  // 切换提供商时，载入该提供商已存的 key / model
+  function switchProvider(p: Provider) {
+    setProviderState(p)
+    setKey(getApiKey(p))
+    setModelInput(getModel(p))
+  }
   const [generatingId, setGeneratingId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -129,7 +150,9 @@ export default function App() {
   }
 
   function saveKey() {
-    setApiKey(apiKey.trim())
+    setProvider(provider)
+    setApiKey(provider, apiKey.trim())
+    setModel(provider, modelInput)
     setShowKey(false)
     setError(null)
   }
@@ -198,18 +221,40 @@ export default function App() {
       {/* API Key 面板 */}
       {showKey && (
         <div className="flex flex-wrap items-center gap-2 border-b border-edge bg-ink px-4 py-2 text-xs">
-          <span className="text-gray-400">Claude API Key（sk-ant-…，仅存本地浏览器，不上传）：</span>
+          <label className="flex items-center gap-1">
+            <span className="text-gray-400">AI 提供商</span>
+            <select
+              value={provider}
+              onChange={(e) => switchProvider(e.target.value as Provider)}
+              className="rounded border border-edge bg-panel px-2 py-1 text-gray-200 outline-none"
+            >
+              <option value="claude">{PROVIDER_LABEL.claude}</option>
+              <option value="openai">{PROVIDER_LABEL.openai}</option>
+            </select>
+          </label>
           <input
             type="password"
             value={apiKey}
             onChange={(e) => setKey(e.target.value)}
-            placeholder="sk-ant-..."
-            className="w-72 rounded border border-edge bg-panel px-2 py-1 text-gray-200 outline-none focus:border-accent2"
+            placeholder={provider === 'openai' ? 'sk-...（OpenAI Key）' : 'sk-ant-...（Claude Key）'}
+            className="w-64 rounded border border-edge bg-panel px-2 py-1 text-gray-200 outline-none focus:border-accent2"
           />
+          <label className="flex items-center gap-1">
+            <span className="text-gray-400">模型</span>
+            <input
+              value={modelInput}
+              onChange={(e) => setModelInput(e.target.value)}
+              placeholder={DEFAULT_MODEL[provider]}
+              className="w-40 rounded border border-edge bg-panel px-2 py-1 text-gray-200 outline-none focus:border-accent2"
+            />
+          </label>
           <button onClick={saveKey} className="rounded bg-accent2 px-3 py-1 font-semibold text-ink hover:brightness-110">
             保存
           </button>
-          <span className="text-gray-500">L2 从你的浏览器直连 api.anthropic.com。</span>
+          <span className="text-gray-500">
+            仅存本地浏览器、不上传；从你的浏览器直连
+            {provider === 'openai' ? ' api.openai.com' : ' api.anthropic.com'}。
+          </span>
         </div>
       )}
 
