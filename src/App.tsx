@@ -5,17 +5,18 @@ import { defaultSelections } from './data/options'
 import { buildShots, renumberAndReallocate, splitScript } from './lib/splitter'
 import { loadProject, saveProject } from './lib/storage'
 import {
-  DEFAULT_MODEL,
-  PROVIDER_LABEL,
+  PROVIDERS,
+  PROVIDER_BY_ID,
   generateShotPrompt,
   getApiKey,
+  getBaseURL,
   getModel,
-  getProvider,
+  getProviderId,
   hasApiKey,
   setApiKey,
+  setBaseURL,
   setModel,
-  setProvider,
-  type Provider,
+  setProviderId,
 } from './lib/ai'
 import { uid } from './lib/id'
 import ShotList from './components/ShotList'
@@ -41,16 +42,18 @@ export default function App() {
   const [project, setProject] = useState<Project>(() => loadProject() ?? newProject())
   const [activeId, setActiveId] = useState<string | null>(null)
   const [scriptDraft, setScriptDraft] = useState(project.scriptText)
-  const [provider, setProviderState] = useState<Provider>(getProvider())
-  const [apiKey, setKey] = useState(getApiKey(getProvider()))
-  const [modelInput, setModelInput] = useState(getModel(getProvider()))
+  const [provider, setProviderState] = useState<string>(getProviderId())
+  const [apiKey, setKey] = useState(getApiKey(getProviderId()))
+  const [modelInput, setModelInput] = useState(getModel(getProviderId()))
+  const [baseURLInput, setBaseURLInput] = useState(getBaseURL(getProviderId()))
   const [showKey, setShowKey] = useState(!hasApiKey())
 
-  // 切换提供商时，载入该提供商已存的 key / model
-  function switchProvider(p: Provider) {
-    setProviderState(p)
-    setKey(getApiKey(p))
-    setModelInput(getModel(p))
+  // 切换提供商时，载入该提供商已存的 key / model / baseURL
+  function switchProvider(id: string) {
+    setProviderState(id)
+    setKey(getApiKey(id))
+    setModelInput(getModel(id))
+    setBaseURLInput(getBaseURL(id))
   }
   const [generatingId, setGeneratingId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -150,9 +153,10 @@ export default function App() {
   }
 
   function saveKey() {
-    setProvider(provider)
+    setProviderId(provider)
     setApiKey(provider, apiKey.trim())
     setModel(provider, modelInput)
+    if (PROVIDER_BY_ID[provider]?.editableBaseURL) setBaseURL(provider, baseURLInput)
     setShowKey(false)
     setError(null)
   }
@@ -225,36 +229,50 @@ export default function App() {
             <span className="text-gray-400">AI 提供商</span>
             <select
               value={provider}
-              onChange={(e) => switchProvider(e.target.value as Provider)}
+              onChange={(e) => switchProvider(e.target.value)}
               className="rounded border border-edge bg-panel px-2 py-1 text-gray-200 outline-none"
             >
-              <option value="claude">{PROVIDER_LABEL.claude}</option>
-              <option value="openai">{PROVIDER_LABEL.openai}</option>
+              {PROVIDERS.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
             </select>
           </label>
           <input
             type="password"
             value={apiKey}
             onChange={(e) => setKey(e.target.value)}
-            placeholder={provider === 'openai' ? 'sk-...（OpenAI Key）' : 'sk-ant-...（Claude Key）'}
-            className="w-64 rounded border border-edge bg-panel px-2 py-1 text-gray-200 outline-none focus:border-accent2"
+            placeholder={`${PROVIDER_BY_ID[provider]?.keyHint ?? 'sk-...'}（Key）`}
+            className="w-56 rounded border border-edge bg-panel px-2 py-1 text-gray-200 outline-none focus:border-accent2"
           />
           <label className="flex items-center gap-1">
             <span className="text-gray-400">模型</span>
             <input
               value={modelInput}
               onChange={(e) => setModelInput(e.target.value)}
-              placeholder={DEFAULT_MODEL[provider]}
+              placeholder={PROVIDER_BY_ID[provider]?.defaultModel || 'model 名'}
               className="w-40 rounded border border-edge bg-panel px-2 py-1 text-gray-200 outline-none focus:border-accent2"
             />
           </label>
+          {PROVIDER_BY_ID[provider]?.editableBaseURL && (
+            <label className="flex items-center gap-1">
+              <span className="text-gray-400">接口地址</span>
+              <input
+                value={baseURLInput}
+                onChange={(e) => setBaseURLInput(e.target.value)}
+                placeholder="https://api.xxx.com/v1"
+                className="w-52 rounded border border-edge bg-panel px-2 py-1 text-gray-200 outline-none focus:border-accent2"
+              />
+            </label>
+          )}
           <button onClick={saveKey} className="rounded bg-accent2 px-3 py-1 font-semibold text-ink hover:brightness-110">
             保存
           </button>
-          <span className="text-gray-500">
-            仅存本地浏览器、不上传；从你的浏览器直连
-            {provider === 'openai' ? ' api.openai.com' : ' api.anthropic.com'}。
-          </span>
+          {PROVIDER_BY_ID[provider]?.keysUrl && (
+            <span className="text-gray-500">拿 Key：{PROVIDER_BY_ID[provider]?.keysUrl}</span>
+          )}
+          <span className="text-gray-500">仅存本地浏览器、不上传。</span>
         </div>
       )}
 
