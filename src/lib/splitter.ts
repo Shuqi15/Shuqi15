@@ -47,19 +47,30 @@ export function allocateDurations(count: number, limit: DurationLimit): number[]
   return result
 }
 
-/** 从剧本文本直接构建一组镜头 */
-export function buildShots(text: string, limit: DurationLimit): Shot[] {
-  const segments = splitScript(text)
-  const durations = allocateDurations(segments.length, limit)
-  return segments.map((seg, i) => ({
+/** 新建一个空白镜头（承载一段剧本原文） */
+export function makeShot(seg: string, order: number, duration: number): Shot {
+  return {
     id: uid('shot'),
-    order: i + 1,
+    order,
     scriptSegment: seg,
     directorNote: '',
     anchorNote: '',
     selections: defaultSelections(),
-    duration: durations[i],
-  }))
+    extras: [],
+    checklist: {},
+    duration,
+  }
+}
+
+/** 从一组剧本片段构建镜头（AI 拆分/规则拆分共用） */
+export function shotsFromSegments(segments: string[], limit: DurationLimit): Shot[] {
+  const durations = allocateDurations(segments.length, limit)
+  return segments.map((seg, i) => makeShot(seg, i + 1, durations[i]))
+}
+
+/** 从剧本文本直接构建一组镜头（规则版拆分） */
+export function buildShots(text: string, limit: DurationLimit): Shot[] {
+  return shotsFromSegments(splitScript(text), limit)
 }
 
 /** 重新编号并重新分配时长（合并/拆分/删除后调用） */

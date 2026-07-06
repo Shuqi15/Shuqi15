@@ -93,6 +93,17 @@ ${shot.anchorNote.trim()}`)
   blocks.push(`# 导演已勾选的 L1 选项（请翻译成具体句子，未勾选处依剧本合理补全）
 ${selectionSummary(shot)}`)
 
+  if (shot.extras && shot.extras.length) {
+    blocks.push(`# 群演/背景层登记表（本镜必须在场，写进 SCENE AUDIT，不得消失/移位/改人数）
+${shot.extras.map((e, i) => `${i + 1}. ${e}`).join('\n')}
+（请依剧本此刻情境，给每个背景人物一个符合身份的微反应）`)
+  }
+
+  if (project.platformId === 'jimeng') {
+    blocks.push(`# 平台特别要求（即梦）
+[衔接锁] 请用即梦 @语法：@图片1 引用上一镜尾帧作首帧人物与站位，@图片2 参考背景，@视频1 参考镜头运动；并强调「外貌、服装、光线与 @图片1 完全一致，承接 @图片1 姿态继续动作」。`)
+  }
+
   if (prevShot) {
     blocks.push(`# 上一镜（镜头${prevShot.order}）——用于衔接锁与左右关系承接
 剧本：${prevShot.scriptSegment}
@@ -108,4 +119,38 @@ ${shot.feedback.trim()}`)
 按系统提示词的【统一输出格式】，为「镜头${shot.order}」输出一个镜头块。`)
 
   return blocks.join('\n\n')
+}
+
+// ---------- AI 智能语义拆分（L2）----------
+
+/** 拆分用系统提示词：按语义 + 时长上限把剧本切成分镜 */
+export const SYSTEM_SPLIT = `你是短剧分镜导演。把导演给的剧本按「语义完整 + 镜头顺序跟随剧本 + 时长可控」拆成一个个镜头。
+规则：
+1. 镜头顺序永远跟随剧本原文顺序，不得打乱、不得漏任何台词与剧情。
+2. 每个镜头是一个语义完整的最小叙事单元（一个动作节拍 / 一句台词 / 一次情绪转折）。
+3. 单个镜头对应的画面时长控制在约 2–4 秒；导演会告诉你单条视频时长上限，你要让相邻镜头能拼进这个上限内。
+4. 台词照搬剧本原文，不改写、不翻译。
+只输出一个 JSON 数组，每个元素是一个字符串（该镜头对应的剧本原文片段），例如：["明窈将合同往桌上一推。","裴渡缓缓直起身，冷笑。","「你觉得，你有得选？」"]
+不要输出任何解释、不要 markdown 代码围栏、不要键名，只要这个 JSON 数组。`
+
+/** 拆分用户消息 */
+export function buildSplitUserMessage(scriptText: string, durationLimit: number): string {
+  return `单条视频时长上限：${durationLimit}s（请据此控制镜头颗粒度与切镜次数）。
+剧本全文如下，请拆分为镜头片段并只输出 JSON 字符串数组：
+
+${scriptText}`
+}
+
+/** 从模型回复里稳健地抽出字符串数组 */
+export function parseSegments(text: string): string[] {
+  const start = text.indexOf('[')
+  const end = text.lastIndexOf(']')
+  if (start < 0 || end < 0 || end <= start) return []
+  try {
+    const arr = JSON.parse(text.slice(start, end + 1))
+    if (Array.isArray(arr)) return arr.map((x) => String(x).trim()).filter(Boolean)
+  } catch {
+    /* fall through */
+  }
+  return []
 }

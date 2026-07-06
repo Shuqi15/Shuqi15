@@ -46,6 +46,10 @@ export interface Shot {
   anchorNote: string
   /** 各维度的结构化选择 */
   selections: ShotSelections
+  /** 群演/背景层登记表（每条 = 一个背景人物「身份+位置」，随剧本生成） */
+  extras: string[]
+  /** 导演逐镜审核清单勾选状态（key = 审核项 id） */
+  checklist: Record<string, boolean>
   /** 本镜头分配到的时长（秒） */
   duration: number
   /** L2 生成的分镜提示词（点「AI 生成」后填充；缓存起来避免重复调用） */

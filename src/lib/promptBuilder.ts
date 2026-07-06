@@ -37,9 +37,10 @@ function aiLine(shot: Shot, dimKey: string): string {
  * 本地草稿（无 AI）：按统一格式尽力拼一个镜头块。
  * 点「AI 生成」后会被 L2 的高质量输出替换（存到 shot.aiOutput）。
  */
-export function localShotDraft(shot: Shot): string {
+export function localShotDraft(shot: Shot, platformId = 'seedance'): string {
   const plot = shot.scriptSegment.trim() || '（空）'
   const note = shot.directorNote.trim()
+  const jimeng = platformId === 'jimeng'
 
   const station = [
     aiLine(shot, 'grid'),
@@ -84,17 +85,28 @@ export function localShotDraft(shot: Shot): string {
     .filter(Boolean)
     .join('；')
 
+  const link =
+    shot.order === 1
+      ? '起始镜，无需承接。'
+      : jimeng
+        ? `承接上一镜：@图片${shot.order - 1} 作首帧引用人物与站位，@图片 参考背景，@视频 参考运镜；外貌服装光线与 @图片${shot.order - 1} 完全一致，承接其姿态继续动作。`
+        : '承接上一镜落幅：姿态/站位/手部/道具归属/光线不变；建议以上一条尾帧图作首帧。'
+
+  const audit = shot.extras && shot.extras.length
+    ? shot.extras.map((e, i) => `${i + 1}.${e}`).join('；') + '——保持原位、虚焦微动，不得消失/移位/改人数'
+    : '无背景人物（或待 AI 依剧本派活）'
+
   const lines = [
     `### 镜头${shot.order}`,
     `${shot.duration || 0}s`,
-    `[衔接锁] ${shot.order === 1 ? '起始镜，无需承接。' : '承接上一镜落幅：姿态/站位/手部/道具归属/光线不变；建议以上一条尾帧图作首帧。'}`,
+    `[衔接锁] ${link}`,
     `[剧情] ${plot}`,
     note ? `[导演意图] ${note}` : '',
     `[站位] ${station || '（待 AI 补全空间锚定四件套）'}`,
     `[动作] ${action || '（待定）'}`,
     `[表演] ${perform || '（待 AI 翻译为肌肉+过程）'}${perform ? '；面部紧致平滑，无法令纹，无五官移位，避免夸张僵硬橡皮脸' : ''}`,
     `[打光] ${light || '（待 AI 展开光线签名块）'}`,
-    `[SCENE AUDIT] （待 AI 依剧本派活）`,
+    `[SCENE AUDIT] ${audit}`,
   ]
   return lines.filter(Boolean).join('\n')
 }
@@ -113,14 +125,14 @@ function headerBlock(project: Project): string {
 }
 
 /** 单镜最终文本：优先 L2 输出，否则本地草稿 */
-export function shotFinalText(shot: Shot): string {
-  return shot.aiOutput?.trim() ? shot.aiOutput.trim() : localShotDraft(shot)
+export function shotFinalText(shot: Shot, platformId = 'seedance'): string {
+  return shot.aiOutput?.trim() ? shot.aiOutput.trim() : localShotDraft(shot, platformId)
 }
 
 /** 整片完整分镜（头部块 + 各镜头块，统一格式） */
 export function buildFullPrompt(project: Project): string {
   const header = `# ${project.title || '未命名项目'}　|　平台：${project.platformId}　|　单条上限：${project.durationLimit}s\n`
-  const body = project.shots.map((s) => shotFinalText(s)).join('\n\n')
+  const body = project.shots.map((s) => shotFinalText(s, project.platformId)).join('\n\n')
   const total = project.shots.reduce((sum, s) => sum + (s.duration || 0), 0)
   return `${header}\n${headerBlock(project)}\n\n${body}\n\n共计${total}s`
 }

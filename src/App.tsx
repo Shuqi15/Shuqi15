@@ -2,11 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import type { DurationLimit, Project, Shot } from './types'
 import { PLATFORMS } from './data/platforms'
 import { defaultSelections } from './data/options'
-import { buildShots, renumberAndReallocate, splitScript } from './lib/splitter'
+import { buildShots, renumberAndReallocate, shotsFromSegments, splitScript } from './lib/splitter'
 import { loadProject, saveProject } from './lib/storage'
 import {
   PROVIDERS,
   PROVIDER_BY_ID,
+  aiSplitScript,
   generateShotPrompt,
   getApiKey,
   getBaseURL,
@@ -56,6 +57,7 @@ export default function App() {
     setBaseURLInput(getBaseURL(id))
   }
   const [generatingId, setGeneratingId] = useState<string | null>(null)
+  const [splitting, setSplitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -79,6 +81,23 @@ export default function App() {
     const shots = buildShots(scriptDraft, project.durationLimit)
     setProject((p) => ({ ...p, scriptText: scriptDraft, shots }))
     setActiveId(shots[0]?.id ?? null)
+  }
+
+  async function doAiSplit() {
+    if (!scriptDraft.trim()) return
+    setError(null)
+    setSplitting(true)
+    try {
+      const segments = await aiSplitScript(scriptDraft, project.durationLimit)
+      if (segments.length === 0) throw new Error('AI 未返回可用的拆分结果，请重试或用规则拆分。')
+      const shots = shotsFromSegments(segments, project.durationLimit)
+      setProject((p) => ({ ...p, scriptText: scriptDraft, shots }))
+      setActiveId(shots[0]?.id ?? null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSplitting(false)
+    }
   }
 
   function patchShot(id: string, patch: Partial<Shot>) {
@@ -117,6 +136,8 @@ export default function App() {
       directorNote: i === 0 ? cur.directorNote : '',
       anchorNote: i === 0 ? cur.anchorNote : '',
       selections: i === 0 ? cur.selections : defaultSelections(),
+      extras: i === 0 ? cur.extras : [],
+      checklist: i === 0 ? cur.checklist : {},
       duration: 0,
       aiOutput: undefined,
     }))
@@ -284,12 +305,22 @@ export default function App() {
           placeholder="在此粘贴剧本 / 剧情 / 台词。例如：明窈将合同往桌上一推。裴渡缓缓直起身，冷笑。「你觉得，你有得选？」"
           className="h-16 flex-1 resize-y rounded-md border border-edge bg-panel p-2 text-sm text-gray-200 outline-none focus:border-accent"
         />
-        <button
-          onClick={doSplit}
-          className="h-16 shrink-0 rounded-md bg-accent px-4 text-sm font-semibold text-ink hover:brightness-110"
-        >
-          拆分分镜 →
-        </button>
+        <div className="flex h-16 shrink-0 flex-col gap-1.5">
+          <button
+            onClick={doSplit}
+            className="flex-1 rounded-md bg-accent px-4 text-sm font-semibold text-ink hover:brightness-110"
+          >
+            拆分分镜 →
+          </button>
+          <button
+            onClick={doAiSplit}
+            disabled={splitting || !hasApiKey()}
+            className="flex-1 rounded-md border border-accent2 px-4 text-xs font-semibold text-accent2 hover:bg-accent2/10 disabled:cursor-not-allowed disabled:opacity-40"
+            title={hasApiKey() ? 'AI 按语义+时长智能拆分' : '需先填 API Key'}
+          >
+            {splitting ? 'AI 拆分中…' : '⚡ AI 智能拆分'}
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -319,6 +350,7 @@ export default function App() {
           {activeShot ? (
             <ShotEditor
               shot={activeShot}
+              platformId={project.platformId}
               generating={generatingId === activeShot.id}
               hasKey={hasApiKey()}
               onChange={(patch) => patchShot(activeShot.id, patch)}
